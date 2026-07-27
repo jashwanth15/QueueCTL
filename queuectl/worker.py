@@ -56,8 +56,15 @@ def run_worker(worker_id):
         print(f"[Worker {worker_id}] {sig_name} received — will stop after current job.", file=sys.stderr)
         shutdown_flag.set()
 
-    signal.signal(signal.SIGTERM, handle_shutdown)
-    signal.signal(signal.SIGINT, handle_shutdown)
+    # signal.signal() only works in the main thread of the main interpreter.
+    # When run as a proper separate OS process (the intended deployment), this
+    # is always the main thread. We guard with try/except for testing flexibility.
+    try:
+        signal.signal(signal.SIGTERM, handle_shutdown)
+        signal.signal(signal.SIGINT, handle_shutdown)
+    except ValueError:
+        # Not in main thread — skip signal handlers (e.g., unit test environments).
+        pass
 
     # Start a background thread to update our heartbeat every 5 seconds.
     # This keeps our entry in the workers table fresh.
