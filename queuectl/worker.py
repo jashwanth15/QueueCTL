@@ -10,7 +10,9 @@ A "worker" is a simple loop that:
 
 Multiple instances of this loop run as separate OS processes. Each
 worker registers its PID in the 'workers' DB table. The 'worker stop'
-command finds those PIDs and sends SIGTERM.
+command sets a stop_requested flag in that table row, which the worker
+polls at the top of every loop — this is the cross-platform shutdown
+mechanism. On Linux, SIGTERM/SIGINT are also handled for interactive use.
 """
 import os
 import sys
@@ -31,6 +33,19 @@ POLL_INTERVAL = 2  # seconds
 
 # How long a job's lease lasts before it is considered crashed.
 LEASE_SECONDS = 20
+
+
+def _is_stop_requested(conn, pid):
+    """
+    Check the workers table to see if stop_requested has been set for this PID.
+    This is the cross-platform shutdown signaling mechanism:
+    'worker stop' writes to the DB; the worker reads it here.
+    """
+    row = conn.execute(
+        "SELECT stop_requested FROM workers WHERE pid=?", (pid,)
+    ).fetchone()
+    # Row is None if the worker was already unregistered (e.g. another stop).
+    return row is None or row["stop_requested"] == 1
 
 
 def run_worker(worker_id):
@@ -84,6 +99,15 @@ def run_worker(worker_id):
 
     try:
         while not shutdown_flag.is_set():
+            # ── DB-BASED STOP CHECK ──
+            # Check the workers table for a stop_requested flag.
+            # This is how 'worker stop' signals us cross-platform:
+            # it writes to the DB and we read it here.
+            # This check runs even if the signal handler wasn't triggered.
+            if _is_stop_requested(conn, pid):
+                print(f"[Worker {worker_id}] Stop requested via DB flag — shutting down.", file=sys.stderr)
+                break
+
             # ── CRASH RECOVERY ──
             # Before looking for new work, reset any jobs whose lease has expired.
             # This handles the case where a worker was killed mid-job.
@@ -196,28 +220,54 @@ def _start_workers_windows(count):
 
 def cmd_worker_stop(args):
     """
-    Stop all running workers by sending SIGTERM to each PID in the workers table.
+    Stop all running workers gracefully.
 
-    This command is run from a DIFFERENT terminal than the workers.
-    It discovers worker PIDs via the SQLite DB (the workers table),
-    then uses os.kill() to send SIGTERM to each one.
+    Cross-platform mechanism:
+    1. Set stop_requested=1 in the workers table for every registered PID.
+       The worker polls this flag at the top of every loop iteration and
+       exits cleanly after finishing any in-flight job.
+    2. Additionally try os.kill(pid, SIGTERM) — on Linux this wakes a sleeping
+       worker immediately; on Windows it terminates the process (which is
+       acceptable because the DB flag is the primary mechanism and the worker
+       would only be sleeping when it sees the flag, not mid-job).
+
+    Design alternatives considered and rejected (see DECISIONS.md):
+    - Signal-only (SIGTERM): not catchable on Windows.
+    - Separate socket/pipe: adds complexity and external state.
+    - File-based flag: the DB is already our shared state store.
     """
     init_db()
     conn = get_connection()
     from queuectl.models import get_all_workers
     workers = get_all_workers(conn)
-    conn.close()
 
     if not workers:
         print("No workers currently registered.")
+        conn.close()
         return
 
     for w in workers:
         pid = w["pid"]
-        try:
-            os.kill(pid, signal.SIGTERM)
-            print(f"Sent SIGTERM to worker PID {pid}.")
-        except ProcessLookupError:
-            print(f"PID {pid} not found (already exited?).", file=sys.stderr)
-        except PermissionError:
-            print(f"Permission denied to signal PID {pid}.", file=sys.stderr)
+        # Step 1: Set the DB flag — this is the reliable cross-platform mechanism.
+        with conn:
+            conn.execute(
+                "UPDATE workers SET stop_requested=1 WHERE pid=?",
+                (pid,)
+            )
+        print(f"Requested stop for worker PID {pid} (DB flag set).")
+
+        # Step 2: Also send SIGTERM to wake a sleeping worker immediately.
+        # On Linux/Mac this is caught by the signal handler and sets shutdown_flag,
+        # waking the worker from its sleep(POLL_INTERVAL) pause.
+        # On Windows, os.kill sends TerminateProcess (hard kill) — so we skip it
+        # there. The DB flag alone is sufficient; the worker checks it on the
+        # next loop tick (within POLL_INTERVAL seconds).
+        if sys.platform != "win32":
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print(f"Sent SIGTERM to worker PID {pid}.")
+            except (ProcessLookupError, OSError):
+                # Process already gone — that's fine.
+                pass
+
+    conn.close()

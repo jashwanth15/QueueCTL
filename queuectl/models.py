@@ -243,7 +243,7 @@ def register_worker(conn, pid):
     ts = now_iso()
     with conn:
         conn.execute(
-            "INSERT OR REPLACE INTO workers (pid, started_at, last_heartbeat) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO workers (pid, started_at, last_heartbeat, stop_requested) VALUES (?, ?, ?, 0)",
             (pid, ts, ts),
         )
 

@@ -54,7 +54,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS workers (
                 pid               INTEGER PRIMARY KEY,
                 started_at        TEXT NOT NULL,
-                last_heartbeat    TEXT NOT NULL
+                last_heartbeat    TEXT NOT NULL,
+                stop_requested    INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS config (
@@ -62,5 +63,11 @@ def init_db():
                 value TEXT NOT NULL
             );
         """)
+        # Migration: add stop_requested column if it doesn't exist yet.
+        # ALTER TABLE ... ADD COLUMN is idempotent-safe via try/except.
+        try:
+            conn.execute("ALTER TABLE workers ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # Column already exists — that's fine.
     conn.close()
     return conn
