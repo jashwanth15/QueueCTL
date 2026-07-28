@@ -222,19 +222,11 @@ def cmd_worker_stop(args):
     """
     Stop all running workers gracefully.
 
-    Cross-platform mechanism:
-    1. Set stop_requested=1 in the workers table for every registered PID.
-       The worker polls this flag at the top of every loop iteration and
-       exits cleanly after finishing any in-flight job.
-    2. Additionally try os.kill(pid, SIGTERM) — on Linux this wakes a sleeping
-       worker immediately; on Windows it terminates the process (which is
-       acceptable because the DB flag is the primary mechanism and the worker
-       would only be sleeping when it sees the flag, not mid-job).
-
-    Design alternatives considered and rejected (see DECISIONS.md):
-    - Signal-only (SIGTERM): not catchable on Windows.
-    - Separate socket/pipe: adds complexity and external state.
-    - File-based flag: the DB is already our shared state store.
+    For each registered worker PID:
+    - If the process IS alive: set stop_requested=1 so it exits cleanly
+      after finishing its current job.
+    - If the process is NOT alive (stale row from a crash or old session):
+      delete the row immediately — no point setting a flag for a dead process.
     """
     init_db()
     conn = get_connection()
@@ -248,26 +240,37 @@ def cmd_worker_stop(args):
 
     for w in workers:
         pid = w["pid"]
-        # Step 1: Set the DB flag — this is the reliable cross-platform mechanism.
-        with conn:
-            conn.execute(
-                "UPDATE workers SET stop_requested=1 WHERE pid=?",
-                (pid,)
-            )
-        print(f"Requested stop for worker PID {pid} (DB flag set).")
 
-        # Step 2: Also send SIGTERM to wake a sleeping worker immediately.
-        # On Linux/Mac this is caught by the signal handler and sets shutdown_flag,
-        # waking the worker from its sleep(POLL_INTERVAL) pause.
-        # On Windows, os.kill sends TerminateProcess (hard kill) — so we skip it
-        # there. The DB flag alone is sufficient; the worker checks it on the
-        # next loop tick (within POLL_INTERVAL seconds).
-        if sys.platform != "win32":
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print(f"Sent SIGTERM to worker PID {pid}.")
-            except (ProcessLookupError, OSError):
-                # Process already gone — that's fine.
-                pass
+        # Probe if the process is actually alive without sending a real signal.
+        # os.kill(pid, 0) raises OSError/ProcessLookupError if the PID is gone.
+        process_alive = False
+        try:
+            os.kill(pid, 0)
+            process_alive = True
+        except (ProcessLookupError, OSError):
+            process_alive = False
+
+        if process_alive:
+            # Process is running — set the DB flag so it exits after its
+            # current job. The worker checks this at the top of every loop tick.
+            with conn:
+                conn.execute(
+                    "UPDATE workers SET stop_requested=1 WHERE pid=?", (pid,)
+                )
+            print(f"Requested stop for worker PID {pid} (DB flag set).")
+
+            # On Linux/Mac, also send SIGTERM to wake a sleeping worker faster.
+            # Skipped on Windows because os.kill() there is TerminateProcess.
+            if sys.platform != "win32":
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
+        else:
+            # Process is dead — stale row from a previous session or crash.
+            # Remove it from the DB so status shows clean state.
+            with conn:
+                conn.execute("DELETE FROM workers WHERE pid=?", (pid,))
+            print(f"Removed stale worker PID {pid} (process no longer running).")
 
     conn.close()
