@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  queuectl-workers:
+    build: .
+    # Keeps the container running and restarts it if it crashes
+    restart: always
+    # We map a volume so that queue.db persists even if the container stops or restarts
+    volumes:
+      - queue-data:/app
+
+volumes:
+  queue-data:
