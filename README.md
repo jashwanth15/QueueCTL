@@ -118,9 +118,21 @@ python queuectl.py config get max-retries
 
 > **Note:** Config changes apply only to jobs enqueued **after** the change. Existing jobs keep the `max_retries` they were created with.
 
+
+---
+
+## Demo
+
+Here is the QueueCTL system running in action. Workers process jobs concurrently, gracefully handle failing jobs by placing them in the DLQ, and allow for clean process shutdown.
+
+![Workers processing jobs concurrently](assets/screenshot_terminal_1.png)
+
+![Queue status showing completed and dead jobs](assets/screenshot_terminal_2.png)
+
 ---
 
 ## Architecture Overview
+
 
 ### Components
 
