@@ -1,0 +1,11 @@
+﻿version: "3.8"
+
+services:
+  queuectl-worker:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./queue.db:/app/queue.db
+      - ./queue.db-wal:/app/queue.db-wal
+      - ./queue.db-shm:/app/queue.db-shm
+    command: ["worker", "start", "--count", "3"]

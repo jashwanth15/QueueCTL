@@ -1,0 +1,35 @@
+﻿name: QueueCTL CI & Benchmarks
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Core Test Suite
+        run: |
+          python test_step2.py
+          python test_step3.py
+          python test_step4.py
+          python test_step5.py
+          python test_step8_9.py
+
+      - name: Run Performance Benchmark
+        run: |
+          python benchmark.py
