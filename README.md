@@ -1,6 +1,12 @@
-# QueueCTL — CLI Background Job Queue
+# QueueCTL — Distributed Background Job Engine
 
-A background job queue system built in Python using only the standard library. Manages jobs with worker processes, retries failures with exponential backoff, maintains a Dead Letter Queue (DLQ), and survives process crashes via lease-based recovery.
+[![Live Demo](https://img.shields.io/badge/Live_Cloud_Dashboard-Railway-blue?style=for-the-badge&logo=railway)](https://queuectl-production-5d3f.up.railway.app)
+[![Docker](https://img.shields.io/badge/Docker-Enabled-blue?style=for-the-badge&logo=docker)](https://www.docker.com/)
+[![CI](https://github.com/jashwanth15/QueueCTL/actions/workflows/ci.yml/badge.svg)](https://github.com/jashwanth15/QueueCTL/actions/workflows/ci.yml)
+
+A high-concurrency background job queue engine built in Python using only the standard library. Manages jobs with worker processes, retries failures with exponential backoff, maintains a Dead Letter Queue (DLQ), and survives process crashes via lease-based recovery.
+
+🚀 **Live Cloud Dashboard:** [https://queuectl-production-5d3f.up.railway.app](https://queuectl-production-5d3f.up.railway.app)
 
 ---
 

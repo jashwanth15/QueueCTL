@@ -3,7 +3,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PORT=8080
 
 WORKDIR /app
 
@@ -13,5 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY . /app
 
+EXPOSE 8080
+
 ENTRYPOINT ["python", "queuectl.py"]
-CMD ["worker", "start"]
+CMD ["dashboard"]

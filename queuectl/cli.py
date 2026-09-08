@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from queuectl.commands import enqueue, status, list_cmd, dlq, config_cmd
 from queuectl import worker as worker_mod
+from queuectl import web as web_mod
 
 
 def main():
@@ -78,6 +79,11 @@ def main():
     p_config_get = config_sub.add_parser("get", help="Get a config value")
     p_config_get.add_argument("key", help="Config key to read")
     p_config_get.set_defaults(func=config_cmd.run_get)
+
+    # ── dashboard ────────────────────────────────────────────────────────────
+    p_dashboard = subparsers.add_parser("dashboard", help="Start Web Dashboard & Background Worker")
+    p_dashboard.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+    p_dashboard.set_defaults(func=lambda a: web_mod.run_server(int(os.environ.get("PORT", a.port))))
 
     # ── internal: _run-worker (used by Windows multi-worker spawning) ────────
     p_run_worker = subparsers.add_parser("_run-worker", help=argparse.SUPPRESS)
