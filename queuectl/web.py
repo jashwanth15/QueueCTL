@@ -209,46 +209,65 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 class QueueDashboardHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/" or parsed.path == "/index.html":
+            html_bytes = HTML_TEMPLATE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html_bytes)))
             self.end_headers()
-            self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
+            self.wfile.write(html_bytes)
 
         elif parsed.path == "/api/status":
-            conn = get_connection()
-            counts = get_job_counts(conn)
-            workers = get_all_workers(conn)
-            
-            # Fetch recent 15 jobs across all states
-            cursor = conn.execute("""
-                SELECT id, command, state, attempts, max_retries, created_at
-                FROM jobs
-                ORDER BY created_at DESC
-                LIMIT 15
-            """)
-            jobs = [dict(r) for r in cursor.fetchall()]
-            conn.close()
+            try:
+                conn = get_connection()
+                counts = get_job_counts(conn)
+                raw_workers = get_all_workers(conn)
+                workers = [dict(w) for w in raw_workers]
+                
+                cursor = conn.execute("""
+                    SELECT id, command, state, attempts, max_retries, created_at
+                    FROM jobs
+                    ORDER BY created_at DESC
+                    LIMIT 15
+                """)
+                jobs = [dict(r) for r in cursor.fetchall()]
+                conn.close()
 
-            payload = {
-                "counts": counts,
-                "total": sum(counts.values()),
-                "workers": workers,
-                "jobs": jobs
-            }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(payload).encode("utf-8"))
+                payload = {
+                    "counts": counts,
+                    "total": sum(counts.values()),
+                    "workers": workers,
+                    "jobs": jobs
+                }
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                err_body = json.dumps({"error": str(e)}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err_body)))
+                self.end_headers()
+                self.wfile.write(err_body)
 
         elif parsed.path == "/health":
+            body = b'{"status":"healthy"}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b'{"status":"healthy"}')
+            self.wfile.write(body)
 
         else:
             self.send_response(404)
@@ -257,27 +276,37 @@ class QueueDashboardHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/enqueue":
-            query_type = "sample"
-            if "type=failing" in parsed.query:
-                query_type = "failing"
+            try:
+                query_type = "sample"
+                if "type=failing" in parsed.query:
+                    query_type = "failing"
 
-            conn = get_connection()
-            job_id = f"job-{uuid.uuid4().hex[:6]}"
-            if query_type == "failing":
-                cmd = "python -c 'import sys; sys.exit(1)'"
-                max_retries = 2
-            else:
-                cmd = f"python -c 'import time; time.sleep(0.5); print(\"Task {job_id} done\")'"
-                max_retries = 3
+                conn = get_connection()
+                job_id = f"job-{uuid.uuid4().hex[:6]}"
+                if query_type == "failing":
+                    cmd = "python -c 'import sys; sys.exit(1)'"
+                    max_retries = 2
+                else:
+                    cmd = f"python -c 'import time; time.sleep(0.5); print(\"Task {job_id} done\")'"
+                    max_retries = 3
 
-            insert_job(conn, job_id, cmd, max_retries)
-            conn.close()
+                insert_job(conn, job_id, cmd, max_retries)
+                conn.close()
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "enqueued", "id": job_id}).encode("utf-8"))
+                res_body = json.dumps({"status": "enqueued", "id": job_id}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(res_body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(res_body)
+            except Exception as e:
+                err_body = json.dumps({"error": str(e)}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err_body)))
+                self.end_headers()
+                self.wfile.write(err_body)
         else:
             self.send_response(404)
             self.end_headers()
